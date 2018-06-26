@@ -14,6 +14,9 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+int
+mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
+
 void
 tvinit(void)
 {
@@ -76,6 +79,29 @@ trap(struct trapframe *tf)
     cprintf("cpu%d: spurious interrupt at %x:%x\n",
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
+    break;
+  case T_PGFLT: ; // bcoz decl not allowed after label
+    uint va = rcr2();
+    struct proc* curproc = myproc();
+    if (va >= KERNBASE || va >= curproc->sz) {
+      cprintf("pid %d %s: trap %d err %d on cpu %d "
+            "eip 0x%x addr 0x%x--kill proc\n",
+            curproc->pid, curproc->name, tf->trapno,
+            tf->err, cpuid(), tf->eip, va);
+      break;
+    }
+    uint a = PGROUNDDOWN(va);
+    char* mem = kalloc();
+    if (mem == 0) {
+      cprintf("allocvm out of memory\n");
+      break;
+    }
+    memset(mem, 0, PGSIZE);
+    if(mappages(curproc->pgdir, (char*)a, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0){
+      cprintf("allocuvm out of memory (2)\n");
+      kfree(mem);
+      break;
+    }
     break;
 
   //PAGEBREAK: 13
