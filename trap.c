@@ -58,6 +58,28 @@ trap(struct trapframe *tf)
       release(&tickslock);
     }
     lapiceoi();
+    // To handle user space timer interrupts
+    // A process is running and interrupt is from user
+    if (myproc() != 0 && (myproc()->tf->cs & 3) == 3 && myproc()->alarmticks != 0) {
+      myproc()->timerticks++;
+      if (myproc()->timerticks >= myproc()->alarmticks) {
+        // Reset alarm ticks
+        myproc()->timerticks = 0;
+        // Push eip into user stack
+        uint uesp = myproc()->tf->esp;
+        if (uesp >= myproc()->sz || uesp-4 >= myproc()->sz) {
+          cprintf("User stack found at invalid address %x.\n", uesp);
+          break;
+        }
+        *(uint*)(uesp-4) = myproc()->tf->eip;
+        // Reflect modified user stack pointer in trapframe
+        myproc()->tf->esp = uesp-4;
+        // TODO: Save all caller save registers
+        // Continue execution from handler
+        myproc()->tf->eip = (uint)(myproc()->alarmhandler);
+        break;
+      }
+    } 
     break;
   case T_IRQ0 + IRQ_IDE:
     ideintr();
